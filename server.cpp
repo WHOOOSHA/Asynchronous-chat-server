@@ -15,7 +15,7 @@ volatile sig_atomic_t sighupReceived = 0;
 
 void sigHupHandler(int sigNumber) {
     sighupReceived = 1;
-    printf("SigHub\n");
+    printf("SIGHUP\n");
 }
 
 void handleConnection(int* incomingSocketFD) {
@@ -101,7 +101,6 @@ int main() {
         if (pselect(maxSd + 1, &readfds, NULL, NULL, NULL, &origMask) != -1)
         {
             if (sighupReceived) {
-                printf("SIGHUP received.\n");
                 sighupReceived = 0;
                 continue;
             }

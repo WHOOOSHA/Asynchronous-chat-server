@@ -23,27 +23,19 @@ int main() {
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(PORT);
 
-    // Converting address to the binary form
-    if (inet_pton(AF_INET, "127.0.0.1", &serverAddress.sin_addr) <= 0) {
-        printf("Error: Address not supported \n");
-        exit(EXIT_FAILURE);
-    }
-
     if (connect(sock, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0) {
-        printf("Connection failed \n");
+        printf("сonnect failed \n");
         exit(EXIT_FAILURE);
     } else {
-        printf("Connection succeed \n");
+        printf("сonnection succeed \n");
     }
 
-    // Отправка сообщения серверу
     send(sock, message, strlen(message), 0);
-    printf("Message sent: %s\n", message);
+    printf("Sent: %s\n", message);
 
-    // Прием ответа от сервера
     ssize_t bytesRead = recv(sock, buffer, sizeof(buffer), 0);
     if (bytesRead > 0) {
-        printf("Received response from server: %s\n", buffer);
+        printf("Response: %s\n", buffer);
     } else {
         perror("recv error");
     }
