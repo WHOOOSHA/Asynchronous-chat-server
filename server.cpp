@@ -3,136 +3,133 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <errno.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/select.h>
 
-#define PORT 8085
-#define LIMIT 5
-#define BUFFER_SIZE 1024
+#define MAX_CLIENTS 10
 
-volatile sig_atomic_t sighupReceived = 0;
 
-void sigHupHandler(int sigNumber) {
-    sighupReceived = 1;
-    printf("SIGHUP\n");
-}
+volatile sig_atomic_t wasSigHup = 0;
 
-void handleConnection(int* incomingSocketFD) {
-    char buffer[BUFFER_SIZE] = { 0 };
-    int readBytes = read(*incomingSocketFD, buffer, BUFFER_SIZE);
-
-    if (readBytes > 0) { 
-        printf("Received data: %d bytes\n", readBytes);
-        printf("Received message from client: %s\n", buffer);
-
-        const char* response = "Hello from server!";
-        if (send(*incomingSocketFD, response, strlen(response), 0) < 0) {
-            perror("send error");
-        }
-
-    } else {
-        if (readBytes == 0) {
-            close(*incomingSocketFD); 
-            *incomingSocketFD = 0; 
-            printf("Connection closed\n\n");
-        } else { 
-            perror("read error"); 
-        }  
-    } 
+void sigHupHandler(int r)
+{
+    wasSigHup = 1;
 }
 
 int main() {
-    int serverFD;
-    int incomingSocketFD = 0; 
-    struct sockaddr_in socketAddress; 
-    int addressLength = sizeof(socketAddress);
-    fd_set readfds;
-    sigset_t blockedMask, origMask;
-    int maxSd;
+    struct sockaddr_in server_addr;
+    int socketTemp, socketServ, socketClient[MAX_CLIENTS];
+    int i;
+    for (i = 0; i < MAX_CLIENTS; i++) {
+        socketClient[i] = -1;
+    }
 
-    if ((serverFD = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("socket error");
+    socketServ = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket == 0) {
+        perror("socket");
         exit(EXIT_FAILURE);
     }
 
-    socketAddress.sin_family = AF_INET;
-    socketAddress.sin_addr.s_addr = INADDR_ANY;
-    socketAddress.sin_port = htons(PORT);
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(12345);
 
-    if (bind(serverFD, (struct sockaddr*)&socketAddress, sizeof(socketAddress)) < 0) {
-        perror("bind error");
+    int err;
+    err = bind(socketServ, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    if (err == -1) {
+        perror("bind");
         exit(EXIT_FAILURE);
     }
-
-    if (listen(serverFD, LIMIT) < 0) {
-        perror("listen error");
+    
+    err = listen(socketServ, MAX_CLIENTS);
+    if (err == -1) {
+        perror("listen");
         exit(EXIT_FAILURE);
     }
-
-    printf("Server started, port %d \n\n", PORT);
 
     struct sigaction sa;
-    int sigactionFirst = sigaction(SIGHUP, NULL, &sa);
+    sigaction(SIGHUP, NULL, &sa);
     sa.sa_handler = sigHupHandler;
     sa.sa_flags |= SA_RESTART;
-    int sigactionSecond = sigaction(SIGHUP, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
 
+    sigset_t blockedMask, origMask;
     sigemptyset(&blockedMask);
-    sigemptyset(&origMask);
     sigaddset(&blockedMask, SIGHUP);
     sigprocmask(SIG_BLOCK, &blockedMask, &origMask);
 
+    fd_set fds;
+
     while (1) {
+        FD_ZERO(&fds);
+        FD_SET(socketServ, &fds);
 
-        FD_ZERO(&readfds); 
-        FD_SET(serverFD, &readfds); 
-        
-        if (incomingSocketFD > 0) { 
-            FD_SET(incomingSocketFD, &readfds); 
-        } 
-        
-        if (incomingSocketFD > serverFD){
-            maxSd =  incomingSocketFD;
-        } else {
-            maxSd = serverFD; 
-        } 
- 
-        if (pselect(maxSd + 1, &readfds, NULL, NULL, NULL, &origMask) != -1)
-        {
-            if (sighupReceived) {
-                sighupReceived = 0;
-                continue;
-            }
-
-            
-        } else {
-            if (errno != EINTR) {
-                perror("pselect error"); 
-                exit(EXIT_FAILURE); 
+        int max_fd = socketServ;
+        for (i = 0; i < MAX_CLIENTS; i++) {
+            if (socketClient[i] != -1) {
+                FD_SET(socketClient[i], &fds);
+                if (socketClient[i] > max_fd) {
+                    max_fd = socketClient[i];
+                }
             }
         }
 
-        if (incomingSocketFD > 0 && FD_ISSET(incomingSocketFD, &readfds)) { 
-            handleConnection(&incomingSocketFD);
-            continue;
+        err = pselect(max_fd + 1, &fds, NULL, NULL, NULL, &origMask);
+        if (err < 0) {
+            if (errno == EINTR) {
+                printf("SIGHUB");
+                break;
+            }
+            else {
+                perror("pselect");
+                break;
+            }
         }
-        
-        if (FD_ISSET(serverFD, &readfds)) {
-            if ((incomingSocketFD = accept(serverFD, (struct sockaddr*)&socketAddress, (socklen_t*)&addressLength)) < 0) {
-                perror("accept error");
+
+        if (FD_ISSET(socketServ, &fds)) {
+            if ((socketTemp = accept(socketServ, NULL, NULL)) < 0) {
+                perror("accept");
                 exit(EXIT_FAILURE);
             }
 
-            printf("New connection.\n");
 
-
+            for (i = 0; socketClient[i] != -1 && i < MAX_CLIENTS; i++);
+            if (i < MAX_CLIENTS) {
+                printf("Новое соединение\n");
+                socketClient[i] = socketTemp;
+            }
+            else {
+                close(socketTemp);
+            }
+            
+            
         }
+        for (i = 0; i < MAX_CLIENTS; i++) {
+            if (socketClient[i] != -1 && FD_ISSET(socketClient[i], &fds)) {
+                char buffer[1024];
+                ssize_t bytes_received = recv(socketClient[i], buffer, sizeof(buffer), 0);
 
-        
+                if (bytes_received > 0) {
+                    printf("Сообщение от клиента: %s\n", buffer);
+                }
+                else if (bytes_received == 0) {
+                    printf("Соединение разорвано\n");
+                    close(socketClient[i]);
+                    socketClient[i] = -1;
+                }
+                else {
+                    perror("recv");
+                }
+            }
+        }
     }
 
-    close(serverFD);
+    close(socketServ);
+    for (i = 0; i < MAX_CLIENTS; i++) {
+        close(socketClient[i]);
+    }
 
     return 0;
 }
